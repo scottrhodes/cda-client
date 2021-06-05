@@ -1,7 +1,8 @@
 package gw.cda.api.outputwriter
 
-import java.io.StringWriter
+import com.fasterxml.jackson.databind.ObjectMapper
 
+import java.io.StringWriter
 import com.guidewire.cda.DataFrameWrapperForMicroBatch
 import com.guidewire.cda.config.ClientConfig
 import gw.cda.api.utils.ObjectMapperSupplier
@@ -13,10 +14,6 @@ import org.apache.spark.sql.SaveMode
 import org.apache.spark.sql.expressions.UserDefinedFunction
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{BinaryType, StructType}
-
-import org.apache.spark.sql.types._
-
-import scala.util.parsing.json.JSONObject
 
 case class OutputWriterConfig(outputPath: String, includeColumnNames: Boolean, saveAsSingleFile: Boolean, saveIntoTimestampDirectory: Boolean, clientConfig: ClientConfig)
 
@@ -131,7 +128,8 @@ trait OutputWriter {
               field.name -> row.getAs[String](field.name)
           }
         }.toMap
-        JSONObject(fieldMap).toString()
+        val mapper = new ObjectMapper()
+        mapper.writeValueAsString(fieldMap)
       }
   }
 

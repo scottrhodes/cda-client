@@ -7,7 +7,7 @@ plugins {
 group "$projectGroupId"
 version = "$version"
 
-description = """Cloud Data Access Client"""
+description = """Open Source Reader - CDA"""
 mainClassName = "gw.cda.api.CloudDataAccessClient"
 
 repositories {
@@ -44,11 +44,18 @@ tasks.withType(ScalaCompile).configureEach {
   scalaCompileOptions.additionalParameters = ["-feature", "-Xfatal-warnings", "-deprecation", "-Xlint:-inaccessible", "-Ywarn-unused-import", "-Ywarn-unused"]
 }
 
+tasks.withType(Test) {
+  systemProperty 'java.library.path', '/Hadoop/bin'
+}
+
 tasks.named("shadowJar").configure {
   zip64 true
   classifier = null
   manifest {
     attributes 'Multi-Release': 'true'
+  }
+  dependencies {
+    exclude(dependency('org.apache.spark:.*'))
   }
 }
 

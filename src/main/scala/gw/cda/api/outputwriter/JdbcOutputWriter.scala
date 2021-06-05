@@ -809,7 +809,7 @@ private[outputwriter] class JdbcOutputWriter(override val outputPath: String, ov
     case DateType         =>
       (stmt: PreparedStatement, row: Row, pos: Int) =>
         stmt.setDate(pos + 1, row.getAs[java.sql.Date](pos))
-    case t: DecimalType   =>
+    case _: DecimalType   =>
       (stmt: PreparedStatement, row: Row, pos: Int) =>
         stmt.setBigDecimal(pos + 1, row.getDecimal(pos))
     case ArrayType(et, _) =>

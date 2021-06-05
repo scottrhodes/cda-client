@@ -18,6 +18,7 @@ private[cda] case class OutputLocation(path: String)
 private[cda] case class SavepointsLocation(path: String)
 
 private[cda] case class OutputSettings(tablesToInclude: String,
+                                       maxKeys: Int,
                                        saveIntoJdbcRaw: Boolean,
                                        saveIntoJdbcMerged: Boolean,
                                        exportTarget: String,

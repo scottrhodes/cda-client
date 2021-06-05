@@ -1,5 +1,6 @@
 package com.guidewire.cda
 
+import java.util.concurrent.ForkJoinPool
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
 import com.amazonaws.services.s3.AmazonS3URI
@@ -15,11 +16,11 @@ import org.apache.spark.SparkConf
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.functions.{lit, when}
 
-import scala.collection.JavaConversions._
 import scala.collection.parallel.ForkJoinTaskSupport
-import scala.concurrent.forkjoin.ForkJoinPool
+import scala.collection.JavaConverters.iterableAsScalaIterableConverter
+
+import org.apache.spark.sql.functions.{lit, when}
 
 private[cda] case class TableS3BaseLocationInfo(tableName: String,
                                                 baseURI: AmazonS3URI)
@@ -52,29 +53,10 @@ class TableReader(clientConfig: ClientConfig) {
 
   // https://spark.apache.org/docs/latest/configuration.html
   private[cda] val conf: SparkConf = new SparkConf()
-  conf.setAppName("Cloud Data Access Client")
-  private val numberOfExecutorThreads = if (clientConfig.performanceTuning.numberOfJobsInParallelMaxCount > Runtime.getRuntime.availableProcessors) {
-    s"local[${clientConfig.performanceTuning.numberOfJobsInParallelMaxCount}]"
-  } else {
-    "local[*]"
-  }
-  conf.setMaster(numberOfExecutorThreads)
-  Option(clientConfig.sparkTuning)
-    .foreach(sparkTuning => {
-      // By default, Spark limits the maximum result size to 1GB, which is usually too small.
-      // Setting it to '0' allows for an unlimited result size.
-      val maxResultSize = Option(sparkTuning.maxResultSize).getOrElse("0")
-      conf.set("spark.driver.maxResultSize", maxResultSize)
-      Option(sparkTuning.executorMemory).foreach(conf.set("spark.executor.memory", _))
-      Option(sparkTuning.driverMemory).foreach(conf.set("spark.driver.memory", _))
-    })
+  conf.setAppName("Open Source Reader - CDA")
 
   private[cda] val spark: SparkSession = SparkSession.builder.config(conf).getOrCreate
   private[cda] val sc: SparkContext = spark.sparkContext
-
-  sc.hadoopConfiguration.set("fs.file.impl", classOf[org.apache.hadoop.fs.LocalFileSystem].getName)
-  sc.hadoopConfiguration.set("fs.s3a.aws.credentials.provider", "com.amazonaws.auth.DefaultAWSCredentialsProviderChain")
-  sc.setLogLevel("ERROR")
 
   def run(singleTableName: String = ""): Unit = {
 
@@ -107,6 +89,7 @@ class TableReader(clientConfig: ClientConfig) {
                        |Source bucket: ${clientConfig.sourceLocation.bucketName}
                        |Manifest has ${manifestMap.size} tables: ${manifestMap.keys.mkString(", ")}
                        |Writing tables to $outputPath
+                       |Max Keys: ${clientConfig.outputSettings.maxKeys}
                        |Save into JDBC Raw: ${clientConfig.outputSettings.saveIntoJdbcRaw}
                        |Save into JDBC Merged: ${clientConfig.outputSettings.saveIntoJdbcMerged}
                        |Export Target: ${clientConfig.outputSettings.exportTarget}
@@ -178,7 +161,7 @@ class TableReader(clientConfig: ClientConfig) {
       val completedNumberOfTableFingerprintPairs = new AtomicInteger(0)
 
       // Start the Copy Jobs, one by one, each in their own thread; while using the semaphore to limit concurrency
-      copyJobs.foreach({ case ((tableName, schemaFingerprint), tableInfo) =>
+      copyJobs.foreach({ case ((tableName, schemaFingerprint), _) =>
         log.info(s"Copy job is pending for '$tableName' with fingerprint '$schemaFingerprint'")
         semaphore.acquire() // this will block
 
@@ -252,7 +235,7 @@ class TableReader(clientConfig: ClientConfig) {
         fingerprintsAvailable
       } else {
         var fingerprintToReturn: Iterable[String] = None: Iterable[String]
-        val firstFingerprintInList = fingerprintsAvailable.toSeq.get(0)
+        val firstFingerprintInList = fingerprintsAvailable.toSeq.head
         val nextReadPointKey = if (lastReadPoint.isDefined) { s"${baseUri.getKey}$firstFingerprintInList/${lastReadPoint.get.toLong + 1}"} else { null }
         val listObjectsRequest = new ListObjectsRequest(baseUri.getBucket, s"${baseUri.getKey}$firstFingerprintInList/", nextReadPointKey, "/", null)
         val objectList = S3ClientSupplier.s3Client.listObjects(listObjectsRequest)
@@ -260,7 +243,7 @@ class TableReader(clientConfig: ClientConfig) {
         if(numberOfTimestampFoldersRemaining>0) {
           fingerprintToReturn=fingerprintsAvailable.iterator.toIterable.filter(_==firstFingerprintInList)
         } else {
-          val secondFingerprintInList = fingerprintsAvailable.toSeq.get(1)
+          val secondFingerprintInList = fingerprintsAvailable.toSeq.apply(1)
           fingerprintToReturn=fingerprintsAvailable.iterator.toIterable.filter(_==secondFingerprintInList)
         }
         fingerprintToReturn
@@ -402,6 +385,7 @@ class TableReader(clientConfig: ClientConfig) {
    * @return The base S3 URI for the table.
    */
   private[cda] def getTableS3BaseLocationFromManifestEntry(tableName: String, manifestEntry: ManifestEntry): AmazonS3URI = {
+    log.debug(tableName)
     val uriString = if (manifestEntry.dataFilesPath.endsWith("/")) {
       manifestEntry.dataFilesPath
     } else {
@@ -421,16 +405,25 @@ class TableReader(clientConfig: ClientConfig) {
    */
   private[cda] def getTableS3LocationWithTimestampsAfterLastSave(tableInfo: TableS3BaseLocationWithFingerprintsWithUnprocessedRecords, savepointsProcessor: SavepointsProcessor): Iterable[TableS3LocationWithTimestampInfo] = {
     val s3URI = tableInfo.baseURI
+    log.debug(s"Base URI for ${tableInfo.tableName} is $s3URI")
     val lastReadPoint = savepointsProcessor.getSavepoint(tableInfo.tableName)
-    log.debug(s"Last read point timestamp for ${tableInfo.tableName} is $lastReadPoint")
     tableInfo.fingerprintsWithUnprocessedRecords.flatMap(fingerprint => {
       val nextReadPointKey = if (lastReadPoint.isDefined) { s"${s3URI.getKey}$fingerprint/${lastReadPoint.get.toLong + 1}"} else { null }
-      val listObjectsRequest = new ListObjectsRequest(s3URI.getBucket, s"${s3URI.getKey}$fingerprint/", nextReadPointKey, "/", null)
+      log.debug(s"Next read point key for ${tableInfo.tableName} is $nextReadPointKey")
+      // A new config parameter has been added to limit the number of files read per table
+      val listObjectsRequest = new ListObjectsRequest(s3URI.getBucket, s"${s3URI.getKey}$fingerprint/", nextReadPointKey,"/",  if (clientConfig.outputSettings.maxKeys == 0) 1000 else clientConfig.outputSettings.maxKeys)
       var objectLists = List(S3ClientSupplier.s3Client.listObjects(listObjectsRequest))
-      while (objectLists.last.isTruncated) {
-        objectLists = objectLists :+ S3ClientSupplier.s3Client.listNextBatchOfObjects(objectLists.last)
+      // if maxKeys is zero or not specified all files will be processed
+      if (clientConfig.outputSettings.maxKeys == 0) {
+        while (objectLists.last.isTruncated) {
+          objectLists = objectLists :+ S3ClientSupplier.s3Client.listNextBatchOfObjects(objectLists.last)
+        }
+      } else {
+        while (objectLists.size >= clientConfig.outputSettings.maxKeys) {
+          objectLists = objectLists :+ S3ClientSupplier.s3Client.listNextBatchOfObjects(objectLists.last)
+        }
       }
-      val timestampSubfolderKeys = objectLists.flatMap(_.getCommonPrefixes)
+      val timestampSubfolderKeys = objectLists.flatMap( _.getCommonPrefixes.asScala.toList)
       timestampSubfolderKeys.map(timestampSubfolderKey => {
         val timestampSubfolderURI = new AmazonS3URI(s"s3://${s3URI.getBucket}/$timestampSubfolderKey")
         val timestampPattern = ".+\\/([0-9]+)\\/$".r
