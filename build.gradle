@@ -7,7 +7,7 @@ plugins {
 group "$projectGroupId"
 version = "$version"
 
-description = """Open Source Reader - CDA"""
+description = """Cloud Data Access Client"""
 mainClassName = "gw.cda.api.CloudDataAccessClient"
 
 repositories {

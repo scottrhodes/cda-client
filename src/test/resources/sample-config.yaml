@@ -6,13 +6,15 @@ outputLocation:
 savepointsLocation:
   path: dummy/path
 outputSettings:
+  tablesToInclude:
   exportTarget: file
   saveIntoJdbcRaw: true
   saveIntoJdbcMerged: true
   fileFormat: csv
   includeColumnNames: true
   saveAsSingleFile: true
-  #saveIntoTimestampDirectory: true #Should default missing boolean to false
+  largeTextFields:
+  saveIntoTimestampDirectory: true #Should default missing boolean to false
 jdbcConnectionRaw:
 ###POSTGRESQL###
   jdbcUsername: postgres

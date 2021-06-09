@@ -199,7 +199,7 @@ object ClientConfigReader {
   private def validatePerformanceTuning(clientConfig: ClientConfig): Unit = {
     // Reasonable defaults for when these are excluded from the config file
     val processorCount = Runtime.getRuntime.availableProcessors
-    val defaultThreadsPerJob = 10
+    val defaultThreadsPerJob = 1
 
     //If the whole section was excluded from the config file
     if (clientConfig.performanceTuning == null) {
