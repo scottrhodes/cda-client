@@ -66,13 +66,6 @@ jdbcConnectionMerged:
   jdbcSchema: dbo
 
   jdbcApplyLatestUpdatesOnly: true
-#performanceTuning:
-#  numberOfJobsInParallelMaxCount: 32
-#  numberOfThreadsPerJob: 15
-#sparkTuning:
-#  maxResultSize: 3G
-#  driverMemory: 6g
-#  executorMemory: 1g
 performanceTuning:
   numberOfJobsInParallelMaxCount: 12
   numberOfThreadsPerJob: 6
